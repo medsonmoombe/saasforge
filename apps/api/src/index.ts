@@ -21,10 +21,8 @@ const envAllowedOrigins = (process.env.CORS_ORIGINS ?? "")
 
 const allowedOrigins = new Set([...defaultAllowedOrigins, ...envAllowedOrigins]);
 
-// Allow our Next.js frontend to talk to this API
 app.register(cors, {
   origin(origin, callback) {
-    // Allow non-browser requests like curl or same-origin server calls.
     if (!origin) {
       callback(null, true);
       return;
@@ -35,7 +33,11 @@ app.register(cors, {
       return;
     }
 
-    // In development, allow LAN access from the same port the Next app uses.
+    if (origin.endsWith(".vercel.app")) {
+      callback(null, true);
+      return;
+    }
+
     try {
       const url = new URL(origin);
       const isDevFrontendPort = url.port === "3000";
@@ -59,13 +61,10 @@ app.register(cors, {
 
 app.register(fastifyTRPCPlugin, {
   prefix:'/trpc',
-  useWSS: false, // Disable WebSocket support for now
+  useWSS: false,
   trpcOptions: { router: appRouter, createContext }
 });
 
-
-
-// Health check route
 app.get("/health", async () => {
   return { status: "ok", timestamp: new Date().toISOString() };
 });
@@ -76,7 +75,6 @@ app.addHook('preHandler', async (request, reply) => {
   }
 });
 
-// Start the server
 const start = async () => {
   try {
     await app.listen({ port: 4000, host: "0.0.0.0" });
