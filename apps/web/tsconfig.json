@@ -13,11 +13,14 @@
     }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
     "next-env.d.ts",
     "next.config.js",
-    ".next/types/**/*.ts"
+    ".next/types/**/*.ts",
+    "proxy.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "../api", "../docs"]
 }
