@@ -1,0 +1,144 @@
+import { pgTable, uuid, varchar, text, timestamp, pgEnum, jsonb, uniqueIndex, index, boolean } from 'drizzle-orm/pg-core';
+
+// ==========================================
+// ENUMS
+// ==========================================
+export const roleEnum = pgEnum("role", ["owner", "admin", "member"]);
+export const planEnum = pgEnum("plan", ["free", "pro"]);
+export const projectStatusEnum = pgEnum("project_status", ["active", "archived"]);
+export const taskStatusEnum = pgEnum("task_status", ["todo", "in_progress","blocked", "done"]);
+export const taskPriorityEnum = pgEnum("task_priority", ["low", "medium", "high", "urgent"]);
+
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "task_assigned", 
+  "status_changed", 
+  "overdue_warning", 
+  "project_shared"
+]);
+
+// ==========================================
+// ORGANIZATIONS TABLE (Keeping the Stripe fields for later!)
+// ==========================================
+export const organizations = pgTable("organizations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  clerkOrgId: varchar("clerk_org_id", { length: 50 }).notNull().unique(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(), 
+  name: text("name").notNull(),
+  plan: planEnum("plan").default("free").notNull(),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 100 }),
+  stripeSubscriptionId: varchar("stripe_subscription_id", { length: 100 }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("org_slug_idx").on(table.slug),
+]);
+
+export const memberships = pgTable("memberships", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: varchar("user_id", { length: 50 }).notNull(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "restrict" }).notNull(),
+  role: roleEnum("role").default("member").notNull(),
+  invitedBy: varchar("invited_by", { length: 50 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("unique_user_org_idx").on(table.userId, table.orgId),
+]);
+
+// ==========================================
+// PROJECTS TABLE
+// ==========================================
+export const projects = pgTable("projects", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "restrict" }).notNull(),
+  slug: varchar("slug", { length: 150 }).notNull(), 
+  name: text("name").notNull(),
+  shareToken: varchar("share_token", { length: 100 }).unique(),
+  status: projectStatusEnum("status").default("active").notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("unique_project_slug_org_idx").on(table.slug, table.orgId),
+]);
+
+// ==========================================
+// TASKS TABLE (The new engine)
+// ==========================================
+export const tasks = pgTable("tasks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "restrict" }).notNull(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  
+  status: taskStatusEnum("status").default("todo").notNull(),
+  // Inside the tasks table definition:
+  blockerReason: text("blocker_reason"), // Only filled if status is 'blocked'
+  priority: taskPriorityEnum("priority").default("medium").notNull(),
+  
+  // Who is working on it? (References Clerk User ID)
+  assigneeId: varchar("assignee_id", { length: 50 }),
+  // Who created it? (Audit trail)
+  creatorId: varchar("creator_id", { length: 50 }).notNull(),
+  
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  // Index for fast querying: Give me all tasks for this org and project
+  index("task_org_project_idx").on(table.orgId, table.projectId),
+]);
+
+export const activities = pgTable("activities", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
+  
+  // Who made the change
+  userId: varchar("user_id", { length: 50 }).notNull(),
+  // What happened (e.g., "status_changed", "assignee_changed")
+  action: varchar("action", { length: 50 }).notNull(),
+  // JSON payload to store what changed (e.g., { from: "todo", to: "in_progress" })
+  payload: jsonb("payload").$type<Record<string, any>>().default({}),
+  
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("activity_task_idx").on(table.taskId),
+]);
+
+// ==========================================
+// IDEMPOTENCY TABLE (For Stripe later)
+// ==========================================
+export const stripeEvents = pgTable("stripe_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventId: varchar("event_id", { length: 100 }).notNull().unique(),
+  processed: boolean("processed").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  
+  // Who is receiving this notification?
+  recipientId: varchar("recipient_id", { length: 50 }).notNull(),
+  
+  // Who triggered it?
+  actorId: varchar("actor_id", { length: 50 }),
+  
+  type: notificationTypeEnum("type").notNull(),
+  message: text("message").notNull(),
+  
+  // To link back to the specific task/project
+  entityId: varchar("entity_id", { length: 100 }),
+  
+  read: boolean("read").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("notification_recipient_idx").on(table.recipientId),
+])
