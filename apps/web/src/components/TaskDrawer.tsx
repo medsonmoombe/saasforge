@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { trpc } from "../trpc/client";
-import type { Task } from "../../../api/src/db/schema";
+import type { Task } from "../types";
 import {
   Loader2,
   Archive,

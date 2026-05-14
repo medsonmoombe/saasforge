@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { trpc } from "../trpc/client";
 import { useOrganization } from "@clerk/nextjs";
-import type { Task } from "../../../api/src/db/schema";
+import type { Task } from "../types";
 import {
   DragDropContext,
   Droppable,
