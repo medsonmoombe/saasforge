@@ -1,4 +1,4 @@
-import { db } from './connection.ts';
+import { db } from './connection';
 import { sql } from 'drizzle-orm';
 
 async function main() {
