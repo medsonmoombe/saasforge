@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import { FastifyRequest, FastifyReply } from "fastify";
 import { db } from "../db/connection";
 import { projects, tasks } from "../db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 
-export async function createPublicContext({ req, res }: { req: FastifyRequest, res: FastifyReply }) {
+export async function createPublicContext({ req, res }: { req: FastifyRequest; res: FastifyReply }) {
   return { req, res };
 }
 
@@ -15,28 +15,28 @@ export const publicRouter = t.router({
   getSharedProject: t.procedure
     .input(z.object({ token: z.string() }))
     .query(async ({ input }) => {
-      const [project] = await db.select().from(projects).where(eq(projects.shareToken, input.token));
-      
-      if (!project) throw new Error("Project not found or link is invalid");
+      const [project] = await db.select().from(projects)
+        .where(eq(projects.shareToken, input.token))
+        .limit(1);
 
-      await db.execute(sql`BEGIN`);
-      await db.execute(sql`SELECT set_config('app.current_org_id', ${project.orgId}, true)`);
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Invalid or expired share link" });
+      if (project.deletedAt) throw new TRPCError({ code: "NOT_FOUND", message: "This project has been archived" });
 
-      const projectTasks = await db.select().from(tasks).where(
-        eq(tasks.projectId, project.id)
-      );
-
-      await db.execute(sql`COMMIT`);
+      const projectTasks = await db.select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+        blockerReason: tasks.blockerReason,
+      })
+        .from(tasks)
+        .where(and(eq(tasks.projectId, project.id), sql`${tasks.deletedAt} is null`));
 
       return {
         name: project.name,
-        tasks: projectTasks.map(t => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-          priority: t.priority,
-          dueDate: t.dueDate,
-        })),
+        slug: project.slug,
+        tasks: projectTasks,
       };
     }),
 });

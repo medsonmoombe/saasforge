@@ -36,6 +36,13 @@
       "when": 1777402775767,
       "tag": "0004_tired_gertrude_yorkes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778834818512,
+      "tag": "0005_add_invite_tokens",
+      "breakpoints": true
     }
   ]
 }

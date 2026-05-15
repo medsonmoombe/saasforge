@@ -17,11 +17,22 @@ export const notificationTypeEnum = pgEnum("notification_type", [
 ]);
 
 // ==========================================
+// USERS TABLE
+// ==========================================
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ==========================================
 // ORGANIZATIONS TABLE (Keeping the Stripe fields for later!)
 // ==========================================
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
-  clerkOrgId: varchar("clerk_org_id", { length: 50 }).notNull().unique(),
   slug: varchar("slug", { length: 100 }).notNull().unique(), 
   name: text("name").notNull(),
   plan: planEnum("plan").default("free").notNull(),
@@ -37,10 +48,10 @@ export const organizations = pgTable("organizations", {
 
 export const memberships = pgTable("memberships", {
   id: uuid("id").defaultRandom().primaryKey(),
-  userId: varchar("user_id", { length: 50 }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   orgId: uuid("org_id").references(() => organizations.id, { onDelete: "restrict" }).notNull(),
   role: roleEnum("role").default("member").notNull(),
-  invitedBy: varchar("invited_by", { length: 50 }),
+  invitedBy: uuid("invited_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
@@ -80,10 +91,8 @@ export const tasks = pgTable("tasks", {
   blockerReason: text("blocker_reason"), // Only filled if status is 'blocked'
   priority: taskPriorityEnum("priority").default("medium").notNull(),
   
-  // Who is working on it? (References Clerk User ID)
-  assigneeId: varchar("assignee_id", { length: 50 }),
-  // Who created it? (Audit trail)
-  creatorId: varchar("creator_id", { length: 50 }).notNull(),
+  assigneeId: uuid("assignee_id").references(() => users.id, { onDelete: "set null" }),
+  creatorId: uuid("creator_id").references(() => users.id, { onDelete: "restrict" }).notNull(),
   
   dueDate: timestamp("due_date", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -99,8 +108,7 @@ export const activities = pgTable("activities", {
   orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
   taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
   
-  // Who made the change
-  userId: varchar("user_id", { length: 50 }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   // What happened (e.g., "status_changed", "assignee_changed")
   action: varchar("action", { length: 50 }).notNull(),
   // JSON payload to store what changed (e.g., { from: "todo", to: "in_progress" })
@@ -121,15 +129,26 @@ export const stripeEvents = pgTable("stripe_events", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const inviteTokens = pgTable("invite_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  role: roleEnum("role").default("member").notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("invite_token_idx").on(table.token),
+]);
+
 export const notifications = pgTable("notifications", {
   id: uuid("id").defaultRandom().primaryKey(),
   orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
   
-  // Who is receiving this notification?
-  recipientId: varchar("recipient_id", { length: 50 }).notNull(),
-  
-  // Who triggered it?
-  actorId: varchar("actor_id", { length: 50 }),
+  recipientId: uuid("recipient_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
   
   type: notificationTypeEnum("type").notNull(),
   message: text("message").notNull(),

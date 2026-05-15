@@ -41,7 +41,7 @@ export const taskRouter = t.router({
       dueDate: z.date().optional().nullable(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [newTask] = await db.insert(tasks).values({
+      const rows = await db.insert(tasks).values({
         projectId: input.projectId,
         title: input.title,
         description: input.description,
@@ -51,6 +51,8 @@ export const taskRouter = t.router({
         orgId: ctx.orgId,
         creatorId: ctx.userId!,
       }).returning();
+      const newTask = rows[0];
+      if (!newTask) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
       await ActivityService.logEvent({
         orgId: ctx.orgId!,
@@ -80,10 +82,12 @@ export const taskRouter = t.router({
         updateData.blockerReason = null;
       }
 
-      const [updatedTask] = await db.update(tasks)
+      const statusRows = await db.update(tasks)
         .set(updateData)
         .where(eq(tasks.id, input.taskId))
         .returning();
+      const updatedTask = statusRows[0];
+      if (!updatedTask) throw new TRPCError({ code: "NOT_FOUND" });
 
       await ActivityService.logEvent({
         orgId: ctx.orgId!,
@@ -112,10 +116,12 @@ export const taskRouter = t.router({
   archive: protectedProcedure
     .input(z.object({ taskId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const [archived] = await db.update(tasks)
+      const archiveRows = await db.update(tasks)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(tasks.id, input.taskId))
         .returning();
+      const archived = archiveRows[0];
+      if (!archived) throw new TRPCError({ code: "NOT_FOUND" });
 
       await ActivityService.logEvent({
         orgId: ctx.orgId!,
@@ -141,26 +147,37 @@ export const taskRouter = t.router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { taskId, ...updateData } = input;
+
+      // Fetch current state to diff against — prevents duplicate activity records
+      const [current] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+
       const [updated] = await db.update(tasks)
         .set({ ...updateData, updatedAt: new Date() })
         .where(eq(tasks.id, taskId))
         .returning();
 
-      // Log specific changes
-      if (input.status) await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "status_changed", payload: { to: input.status, blockerReason: input.blockerReason } });
-      if (input.priority) await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "priority_changed", payload: { to: input.priority } });
-      if (input.assigneeId !== undefined) await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "assignee_changed", payload: { to: input.assigneeId } });
-      if (input.dueDate !== undefined) await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "due_date_changed", payload: { to: input.dueDate } });
+      // Only log when the value actually changed
+      if (input.status !== undefined && input.status !== current?.status)
+        await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "status_changed", payload: { from: current?.status, to: input.status, blockerReason: input.blockerReason } });
 
-      // Send notification if task is assigned to someone
-      if (input.assigneeId) {
+      if (input.priority !== undefined && input.priority !== current?.priority)
+        await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "priority_changed", payload: { from: current?.priority, to: input.priority } });
+
+      if (input.assigneeId !== undefined && input.assigneeId !== current?.assigneeId)
+        await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "assignee_changed", payload: { from: current?.assigneeId, to: input.assigneeId } });
+
+      if (input.dueDate !== undefined && String(input.dueDate) !== String(current?.dueDate))
+        await ActivityService.logEvent({ orgId: ctx.orgId!, taskId, userId: ctx.userId!, action: "due_date_changed", payload: { from: current?.dueDate, to: input.dueDate } });
+
+      // Notify assignee only when assignee actually changed to a new person
+      if (input.assigneeId && input.assigneeId !== current?.assigneeId) {
         await NotificationService.create({
           orgId: ctx.orgId!,
           recipientId: input.assigneeId,
           actorId: ctx.userId!,
           type: "task_assigned",
-          message: `You were assigned to "${updated.title}".`,
-          entityId: updated.id,
+          message: `You were assigned to "${updated?.title}".`,
+          entityId: updated?.id,
         });
       }
 
@@ -171,8 +188,19 @@ export const taskRouter = t.router({
   getActivities: protectedProcedure
     .input(z.object({ taskId: z.string().uuid() }))
     .query(async ({ input }) => {
-      return await db.select()
+      const { users } = await import("../db/schema");
+      return await db
+        .select({
+          id: activities.id,
+          taskId: activities.taskId,
+          action: activities.action,
+          payload: activities.payload,
+          createdAt: activities.createdAt,
+          userId: activities.userId,
+          userName: users.name,
+        })
         .from(activities)
+        .innerJoin(users, eq(users.id, activities.userId))
         .where(eq(activities.taskId, input.taskId))
         .orderBy(desc(activities.createdAt));
     }),

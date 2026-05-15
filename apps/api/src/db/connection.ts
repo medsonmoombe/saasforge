@@ -11,7 +11,7 @@ if (!connectionString) {
 }
 
 const client = postgres(connectionString, {
-    prepare: true, // Enable prepared statements for better performance and security
+    prepare: false,
 });
 
 export const db = drizzle(client, {

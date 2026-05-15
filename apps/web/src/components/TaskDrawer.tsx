@@ -97,11 +97,7 @@ const priorityOptions = Object.entries(priorityConfig).map(([value, config]) => 
 
 type OrgMember = {
   id: string;
-  publicUserData?: {
-    userId?: string | null;
-    firstName?: string | null;
-    identifier?: string | null;
-  } | null;
+  name: string;
 };
 
 interface TaskDrawerProps {
@@ -186,19 +182,13 @@ export function TaskDrawer({ task, onClose, projectId, orgMembers }: TaskDrawerP
 
   const assigneeName = useMemo(() => {
     if (!form?.assigneeId) return "Unassigned";
-    const match = orgMembers.find((member) => member.publicUserData?.userId === form.assigneeId);
-    return match?.publicUserData?.firstName || match?.publicUserData?.identifier || "Assigned";
+    return orgMembers.find((m) => m.id === form.assigneeId)?.name ?? "Assigned";
   }, [form?.assigneeId, orgMembers]);
-
-  const getMemberName = (userId: string) => {
-    const match = orgMembers.find((member) => member.publicUserData?.userId === userId);
-    return match?.publicUserData?.firstName || match?.publicUserData?.identifier || `${userId.slice(0, 8)}...`;
-  };
 
   const formatActivityValue = (action: string, value: unknown) => {
     if (!value) return "";
     if (action === "assignee_changed" && typeof value === "string") {
-      return getMemberName(value);
+      return orgMembers.find(m => m.id === value)?.name ?? value.slice(0, 8);
     }
     if (typeof value === "string") return value.replace(/_/g, " ");
     return JSON.stringify(value);
@@ -407,16 +397,11 @@ export function TaskDrawer({ task, onClose, projectId, orgMembers }: TaskDrawerP
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {orgMembers.map((member) => {
-                        const userId = member.publicUserData?.userId;
-                        if (!userId) return null;
-
-                        return (
-                          <SelectItem key={member.id} value={userId}>
-                            {member.publicUserData?.firstName || member.publicUserData?.identifier || "Team member"}
+                      {orgMembers.map((member) => (
+                          <SelectItem key={member.id} value={member.id}>
+                            {member.name}
                           </SelectItem>
-                        );
-                      })}
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -468,8 +453,8 @@ export function TaskDrawer({ task, onClose, projectId, orgMembers }: TaskDrawerP
                             {activity.action.replace(/_/g, " ")}
                           </p>
                           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                            {getMemberName(activity.userId)}
-                            {activity.payload?.to ? ` -> ${formatActivityValue(activity.action, activity.payload.to)}` : ""}
+                            {activity.userName ?? activity.userId}
+                            {activity.payload?.to ? ` → ${formatActivityValue(activity.action, activity.payload.to)}` : ""}
                           </p>
                         </div>
                         <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-400">

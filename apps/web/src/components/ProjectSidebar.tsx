@@ -1,121 +1,172 @@
 "use client";
 
-import { useState } from "react";
 import { trpc } from "../trpc/client";
-import { Loader2, Plus, Archive, Sparkles, FolderKanban } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
+import { FolderKanban, Archive, LayoutDashboard, Users, Settings, ChevronDown, ChevronRight, Plus, Layers, X } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { useState } from "react";
 
-interface ProjectSidebarProps {
+interface Props {
   selectedProjectId: string | null;
-  onSelectProject: (id: string) => void;
+  onSelectProject: (id: string | null) => void;
+  activeView: string;
+  onChangeView: (view: string) => void;
+  open: boolean;
+  onClose: () => void;
 }
 
-export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSidebarProps) {
-  const [projectName, setProjectName] = useState("");
-  const [projectSlug, setProjectSlug] = useState("");
+const navLinks = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "projects", label: "Projects", icon: Layers },
+  { id: "team", label: "Team", icon: Users },
+  { id: "settings", label: "Settings", icon: Settings },
+];
 
-  const utils = trpc.useUtils();
+export function ProjectSidebar({ selectedProjectId, onSelectProject, activeView, onChangeView, open, onClose }: Props) {
+  const [projectsExpanded, setProjectsExpanded] = useState(true);
   const { data: projects } = trpc.projects.getAll.useQuery();
+  const utils = trpc.useUtils();
 
-  const createProject = trpc.projects.create.useMutation({
-    onSuccess: () => { 
-      utils.projects.getAll.invalidate(); 
-      setProjectName(""); 
-      setProjectSlug(""); 
-      toast.success("Project created successfully!");
-    },
-    onError: (err: any) => {
-      toast.error("Failed to create project", { description: err.message });
-    },
-  });
-
-  const archiveProject = trpc.projects.archive.useMutation({
-    onSuccess: () => { 
-      utils.projects.getAll.invalidate(); 
-      onSelectProject("");
+  const archive = trpc.projects.archive.useMutation({
+    onSuccess: () => {
+      utils.projects.getAll.invalidate();
+      onSelectProject(null);
+      onChangeView("projects");
       toast.success("Project archived");
     },
   });
 
-  return (
-    <aside className="flex w-64 flex-col border-r border-slate-200/60 dark:border-slate-800/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-4">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xs font-bold uppercase tracking-wider bg-gradient-to-r from-slate-600 to-slate-800 dark:from-slate-400 dark:to-slate-200 bg-clip-text text-transparent">Projects</h2>
+  const navigate = (view: string, projectId?: string) => {
+    if (projectId) {
+      onSelectProject(projectId);
+      onChangeView("board");
+    } else {
+      onChangeView(view);
+      onSelectProject(null);
+    }
+    onClose(); // close drawer on mobile after navigation
+  };
+
+  const sidebarContent = (
+    <aside className="flex h-full w-60 flex-col bg-white dark:bg-slate-900 border-r border-slate-200/60 dark:border-slate-800/60">
+      {/* Mobile close button */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800 lg:hidden">
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Menu</span>
+        <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500">
+          <X className="h-4 w-4" />
+        </button>
       </div>
-      
-      <form onSubmit={(e) => { 
-        e.preventDefault(); 
-        createProject.mutate({ name: projectName, slug: projectSlug }); 
-      }} className="mb-6 space-y-3">
-        <Input 
-          placeholder="Project name" 
-          value={projectName} 
-          onChange={(e) => setProjectName(e.target.value)} 
-          className="h-9 text-sm bg-white/80 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 shadow-sm" 
-          required 
-        />
-        <Input 
-          placeholder="Slug (e.g. my-proj)" 
-          value={projectSlug} 
-          onChange={(e) => setProjectSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} 
-          className="h-9 text-xs text-slate-500 bg-white/80 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 shadow-sm" 
-          required 
-        />
-        <Button 
-          type="submit" 
-          size="sm" 
-          className="w-full h-9 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all" 
-          disabled={createProject.isPending}
-        >
-          {createProject.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Plus className="mr-2 h-3 w-3" />}
-          Create Project
-        </Button>
-      </form>
 
-      <Separator className="mb-4 bg-gradient-to-r from-transparent via-slate-300 dark:via-slate-700 to-transparent" />
+      {/* Main nav */}
+      <nav className="px-3 pt-3 pb-2 space-y-0.5">
+        {navLinks.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => navigate(id)}
+            className={cn(
+              "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+              activeView === id && !selectedProjectId
+                ? "bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100"
+            )}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {label}
+          </button>
+        ))}
+      </nav>
 
-      <div className="flex-1 space-y-1 overflow-y-auto">
-        {projects?.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-950 dark:to-indigo-950 rounded-full p-3 mb-3">
-              <Sparkles className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 px-4">Create your first project to get started</p>
+      <div className="mx-3 my-2 border-t border-slate-200/60 dark:border-slate-700/60" />
+
+      {/* Recent projects */}
+      <div className="flex-1 flex flex-col overflow-hidden px-3">
+        <div className="flex items-center justify-between py-1.5 mb-1">
+          <button
+            type="button"
+            onClick={() => setProjectsExpanded(v => !v)}
+            className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+          >
+            {projectsExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Recent
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("projects")}
+            className="flex items-center justify-center h-5 w-5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+            title="All projects"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {projectsExpanded && (
+          <div className="flex-1 overflow-y-auto space-y-0.5 pb-4">
+            {!projects?.length ? (
+              <button
+                type="button"
+                onClick={() => navigate("projects")}
+                className="w-full text-xs text-slate-400 dark:text-slate-500 px-2 py-3 text-center hover:text-blue-500 transition-colors"
+              >
+                + Create your first project
+              </button>
+            ) : (
+              projects.slice(0, 8).map((project) => (
+                <div
+                  key={project.id}
+                  className={cn(
+                    "group flex items-center rounded-lg transition-all",
+                    selectedProjectId === project.id
+                      ? "bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => navigate("board", project.id)}
+                    className="flex flex-1 min-w-0 items-center gap-2.5 px-3 py-2 text-sm text-left"
+                  >
+                    <FolderKanban className={cn("h-4 w-4 shrink-0", selectedProjectId === project.id ? "text-blue-500" : "text-slate-400")} />
+                    <span className="truncate font-medium">{project.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { if (confirm("Archive this project?")) archive.mutate({ projectId: project.id }); }}
+                    className="shrink-0 pr-2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"
+                    title="Archive"
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))
+            )}
           </div>
-        ) : (
-          projects?.map((project) => (
-            <div
-              key={project.id}
-              className={`w-full rounded-lg text-sm transition-all flex items-center group ${
-                selectedProjectId === project.id 
-                  ? "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50 text-slate-900 dark:text-slate-100 font-medium shadow-sm border border-blue-200/50 dark:border-blue-800/50" 
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 hover:shadow-sm"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => onSelectProject(project.id)}
-                className="flex flex-1 min-w-0 items-center gap-2 px-3 py-2.5 text-left"
-              >
-                <FolderKanban className={`h-4 w-4 shrink-0 ${selectedProjectId === project.id ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}`} />
-                <span className="truncate">{project.name}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { 
-                  if (confirm("Archive this project?")) archiveProject.mutate({ projectId: project.id });
-                }} 
-                className="shrink-0 px-3 text-slate-300 transition-all hover:text-red-500 opacity-0 group-hover:opacity-100"
-              >
-                <Archive className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))
         )}
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      {/* Desktop: always visible */}
+      <div className="hidden lg:flex shrink-0">
+        {sidebarContent}
+      </div>
+
+      {/* Mobile: slide-in drawer */}
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm lg:hidden"
+            onClick={onClose}
+          />
+          {/* Drawer */}
+          <div className="fixed inset-y-0 left-0 z-50 lg:hidden flex">
+            {sidebarContent}
+          </div>
+        </>
+      )}
+    </>
   );
 }
