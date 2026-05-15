@@ -113,6 +113,45 @@ export const EmailService = {
       `.trim(),
     });
   },
+  async sendPasswordReset({ to, resetUrl }: { to: string; resetUrl: string }) {
+    await transporter.sendMail({
+      from: `"SaaSForge" <${process.env.EMAIL_FROM}>`,
+      to,
+      subject: "Reset your SaaSForge password",
+      html: `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr><td style="height:4px;background:linear-gradient(90deg,#2563eb,#6366f1,#a855f7);"></td></tr>
+        <tr><td style="padding:40px 40px 0;text-align:center;">
+          <div style="display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#6366f1);margin-bottom:20px;">
+            <span style="font-size:24px;">🔐</span>
+          </div>
+          <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Reset your password</h1>
+          <p style="margin:0;font-size:15px;color:#64748b;">Click the button below to set a new password. This link expires in <strong>1 hour</strong>.</p>
+        </td></tr>
+        <tr><td style="padding:32px 40px;text-align:center;">
+          <a href="${resetUrl}" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#2563eb,#6366f1);color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:10px;">Reset Password</a>
+        </td></tr>
+        <tr><td style="padding:0 40px 24px;">
+          <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;text-align:center;">Or copy this link:</p>
+          <p style="margin:0;font-size:12px;color:#6366f1;text-align:center;word-break:break-all;">${resetUrl}</p>
+        </td></tr>
+        <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #f1f5f9;margin:0;"/></td></tr>
+        <tr><td style="padding:24px 40px 32px;text-align:center;">
+          <p style="margin:0;font-size:12px;color:#94a3b8;">If you didn't request this, you can safely ignore it.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`.trim(),
+    });
+  },
   async sendShareLink({
     to,
     projectName,

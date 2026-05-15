@@ -5,6 +5,7 @@ import { FolderKanban, Archive, LayoutDashboard, Users, Settings, ChevronDown, C
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useAuthContext } from "@/lib/auth-context";
 
 interface Props {
   selectedProjectId: string | null;
@@ -24,6 +25,9 @@ const navLinks = [
 
 export function ProjectSidebar({ selectedProjectId, onSelectProject, activeView, onChangeView, open, onClose }: Props) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
+  const { orgId, userId } = useAuthContext();
+  const { data: members } = trpc.auth.getMembers.useQuery();
+  const canManage = members?.find(m => m.id === userId)?.role !== "member";
   const { data: projects } = trpc.projects.getAll.useQuery();
   const utils = trpc.useUtils();
 
@@ -90,14 +94,16 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, activeView,
             {projectsExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             Recent
           </button>
+          {canManage && (
           <button
             type="button"
             onClick={() => navigate("projects")}
             className="flex items-center justify-center h-5 w-5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            title="All projects"
+            title="New project"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
+          )}
         </div>
 
         {projectsExpanded && (
@@ -129,6 +135,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, activeView,
                     <FolderKanban className={cn("h-4 w-4 shrink-0", selectedProjectId === project.id ? "text-blue-500" : "text-slate-400")} />
                     <span className="truncate font-medium">{project.name}</span>
                   </button>
+                  {canManage && (
                   <button
                     type="button"
                     onClick={() => { if (confirm("Archive this project?")) archive.mutate({ projectId: project.id }); }}
@@ -137,6 +144,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, activeView,
                   >
                     <Archive className="h-3.5 w-3.5" />
                   </button>
+                  )}
                 </div>
               ))
             )}

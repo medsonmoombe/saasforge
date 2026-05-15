@@ -17,6 +17,7 @@ export function SettingsView() {
   const { data: me } = trpc.auth.me.useQuery(undefined, { enabled: !!userId });
   const currentOrg = me?.orgs.find(o => o.id === orgId) ?? me?.orgs[0];
   const isOwner = currentOrg?.role === "owner";
+  const canManage = currentOrg?.role === "owner" || currentOrg?.role === "admin";
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -110,9 +111,11 @@ export function SettingsView() {
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Your Organizations</h2>
+              {canManage && (
               <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setCreateOrgOpen(true)}>
                 <Plus className="h-3.5 w-3.5" /> New Org
               </Button>
+              )}
             </div>
             <div className="space-y-2">
               {me.orgs.map((org) => (

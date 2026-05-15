@@ -2,7 +2,7 @@ import { z } from "zod";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { Context } from "./context";
 import { db } from "../db/connection";
-import { users, organizations, memberships, inviteTokens, projects, tasks } from "../db/schema";
+import { users, organizations, memberships, inviteTokens, projects, tasks, passwordResetTokens } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -270,6 +270,91 @@ export const authRouter = t.router({
 
     return { ...user, orgs };
   }),
+
+  forgotPassword: t.procedure
+    .input(z.object({ email: z.string().email() }))
+    .mutation(async ({ input }) => {
+      // Always return success to prevent email enumeration
+      const [user] = await db.select({ id: users.id, email: users.email })
+        .from(users).where(eq(users.email, input.email)).limit(1);
+      if (!user) return { success: true };
+
+      const token = randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await db.insert(passwordResetTokens).values({ userId: user.id, token, expiresAt });
+
+      const baseUrl = process.env.APP_URL ?? "http://localhost:3000";
+      await EmailService.sendPasswordReset({
+        to: user.email,
+        resetUrl: `${baseUrl}/?reset=${token}`,
+      });
+      return { success: true };
+    }),
+
+  resetPassword: t.procedure
+    .input(z.object({ token: z.string(), password: z.string().min(8) }))
+    .mutation(async ({ input }) => {
+      const [record] = await db.select().from(passwordResetTokens)
+        .where(eq(passwordResetTokens.token, input.token)).limit(1);
+
+      if (!record) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid or expired reset link" });
+      if (record.usedAt) throw new TRPCError({ code: "BAD_REQUEST", message: "Reset link already used" });
+      if (record.expiresAt < new Date()) throw new TRPCError({ code: "BAD_REQUEST", message: "Reset link has expired" });
+
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, record.userId));
+      await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, record.id));
+
+      return { success: true };
+    }),
+
+  updateMemberRole: protectedProcedure
+    .input(z.object({ memberId: z.string().uuid(), role: z.enum(["admin", "member"]) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) throw new TRPCError({ code: "FORBIDDEN" });
+      const [caller] = await db.select({ role: memberships.role })
+        .from(memberships)
+        .where(and(eq(memberships.userId, ctx.userId), eq(memberships.orgId, ctx.orgId)))
+        .limit(1);
+      if (!caller || caller.role === "member")
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only owners and admins can change roles" });
+
+      // Prevent demoting the owner
+      const [target] = await db.select({ role: memberships.role })
+        .from(memberships)
+        .where(and(eq(memberships.userId, input.memberId), eq(memberships.orgId, ctx.orgId)))
+        .limit(1);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND" });
+      if (target.role === "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Cannot change the owner's role" });
+
+      await db.update(memberships)
+        .set({ role: input.role, updatedAt: new Date() })
+        .where(and(eq(memberships.userId, input.memberId), eq(memberships.orgId, ctx.orgId)));
+      return { success: true };
+    }),
+
+  removeMember: protectedProcedure
+    .input(z.object({ memberId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) throw new TRPCError({ code: "FORBIDDEN" });
+      const [caller] = await db.select({ role: memberships.role })
+        .from(memberships)
+        .where(and(eq(memberships.userId, ctx.userId), eq(memberships.orgId, ctx.orgId)))
+        .limit(1);
+      if (!caller || caller.role === "member")
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only owners and admins can remove members" });
+
+      const [target] = await db.select({ role: memberships.role })
+        .from(memberships)
+        .where(and(eq(memberships.userId, input.memberId), eq(memberships.orgId, ctx.orgId)))
+        .limit(1);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND" });
+      if (target.role === "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Cannot remove the owner" });
+
+      await db.delete(memberships)
+        .where(and(eq(memberships.userId, input.memberId), eq(memberships.orgId, ctx.orgId)));
+      return { success: true };
+    }),
 });
 
 export type AuthRouter = typeof authRouter;

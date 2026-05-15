@@ -14,7 +14,7 @@ import { OrgSetupModal } from "./OrgSetupModal";
 import { trpc } from "../trpc/client";
 import { toast } from "sonner";
 
-type AuthMode = "login" | "register";
+type AuthMode = "login" | "register" | "forgot" | "reset";
 
 interface FieldErrors {
   name?: string;
@@ -23,10 +23,11 @@ interface FieldErrors {
   form?: string;
 }
 
-function AuthModal({ open, onOpenChange, initialMode }: {
+function AuthModal({ open, onOpenChange, initialMode, resetToken }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initialMode: AuthMode;
+  resetToken?: string;
 }) {
   const { setAuth } = useAuthContext();
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -35,24 +36,19 @@ function AuthModal({ open, onOpenChange, initialMode }: {
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [forgotSent, setForgotSent] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   useEffect(() => { setMode(initialMode); }, [initialMode]);
 
   useEffect(() => {
     if (!open) {
       setEmail(""); setPassword(""); setName("");
-      setErrors({}); setShowPassword(false);
+      setErrors({}); setShowPassword(false); setForgotSent(false);
     }
   }, [open]);
 
-  const validate = (): boolean => {
-    const next: FieldErrors = {};
-    if (mode === "register" && name.trim().length < 2) next.name = "Name must be at least 2 characters";
-    if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) next.email = "Enter a valid email address";
-    if (password.length < 8) next.password = "Password must be at least 8 characters";
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
+  const switchMode = (next: AuthMode) => { setMode(next); setErrors({}); setForgotSent(false); };
 
   const login = trpc.auth.login.useMutation({
     onSuccess: (data) => {
@@ -73,44 +69,70 @@ function AuthModal({ open, onOpenChange, initialMode }: {
     onError: (err) => setErrors({ form: err.message }),
   });
 
+  const forgotPassword = trpc.auth.forgotPassword.useMutation({
+    onSuccess: () => setForgotSent(true),
+    onError: (err) => setErrors({ form: err.message }),
+  });
+
+  const resetPassword = trpc.auth.resetPassword.useMutation({
+    onSuccess: () => {
+      toast.success("Password reset! Please sign in.");
+      setPassword("");
+      setErrors({});
+      setResetDone(true);
+      switchMode("login");
+    },
+    onError: (err) => setErrors({ form: err.message }),
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
-    if (!validate()) return;
+    if (mode === "forgot") {
+      if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return setErrors({ email: "Enter a valid email" });
+      forgotPassword.mutate({ email });
+      return;
+    }
+    if (mode === "reset") {
+      if (password.length < 8) return setErrors({ password: "Password must be at least 8 characters" });
+      resetPassword.mutate({ token: resetToken!, password });
+      return;
+    }
+    const next: FieldErrors = {};
+    if (mode === "register" && name.trim().length < 2) next.name = "Name must be at least 2 characters";
+    if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) next.email = "Enter a valid email address";
+    if (password.length < 8) next.password = "Password must be at least 8 characters";
+    if (Object.keys(next).length) { setErrors(next); return; }
     if (mode === "login") login.mutate({ email, password });
     else register.mutate({ email, password, name });
   };
 
-  const isPending = login.isPending || register.isPending;
+  const isPending = login.isPending || register.isPending || forgotPassword.isPending || resetPassword.isPending;
 
-  const switchMode = (next: AuthMode) => {
-    setMode(next);
-    setErrors({});
+  const headings: Record<AuthMode, { title: string; sub: string }> = {
+    login: { title: "Welcome back", sub: "Sign in to continue to SaaSForge" },
+    register: { title: "Create your account", sub: "Start your free account today" },
+    forgot: { title: "Forgot password", sub: "We'll send you a reset link" },
+    reset: { title: "Set new password", sub: "Choose a strong password" },
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => {
+      // Prevent closing the modal when in reset mode — user must complete or navigate away
+      if (!v && (mode === "reset" || initialMode === "reset") && !resetDone) return;
+      onOpenChange(v);
+    }}>
       <DialogContent className="sm:max-w-[440px] p-0 overflow-hidden border-0 shadow-2xl max-h-[90vh] flex flex-col">
-        {/* Top gradient bar */}
         <div className="h-1 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600" />
-
         <div className="px-8 pt-8 pb-10 overflow-y-auto">
-          {/* Logo + heading */}
           <div className="mb-8 text-center">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 mb-4 shadow-lg">
               <Sparkles className="h-6 w-6 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-              {mode === "login" ? "Welcome back" : "Create your account"}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {mode === "login"
-                ? "Sign in to continue to SaaSForge"
-                : "Start your free account today"}
-            </p>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{headings[mode].title}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{headings[mode].sub}</p>
           </div>
 
-          {/* Form-level error */}
           {errors.form && (
             <div className="mb-5 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30 px-4 py-3">
               <div className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-red-500 flex items-center justify-center">
@@ -120,101 +142,66 @@ function AuthModal({ open, onOpenChange, initialMode }: {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-            {mode === "register" && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Full name
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input
-                    placeholder="Jane Smith"
-                    value={name}
-                    onChange={(e) => { setName(e.target.value); setErrors((p) => ({ ...p, name: undefined })); }}
-                    className={`pl-10 h-11 ${errors.name ? "border-red-400 focus-visible:ring-red-400/30" : ""}`}
-                  />
+          {mode === "forgot" && forgotSent ? (
+            <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800 px-4 py-4 text-center">
+              <p className="text-sm font-medium text-green-700 dark:text-green-300">Check your email for a reset link.</p>
+              <button type="button" className="mt-3 text-xs text-blue-600 hover:underline" onClick={() => switchMode("login")}>Back to sign in</button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              {mode === "register" && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Full name</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Input placeholder="Jane Smith" value={name} onChange={(e) => { setName(e.target.value); setErrors((p) => ({ ...p, name: undefined })); }} className={`pl-10 h-11 ${errors.name ? "border-red-400" : ""}`} />
+                  </div>
+                  {errors.name && <p className="text-xs text-red-500">{errors.name}</p>}
                 </div>
-                {errors.name && <p className="text-xs text-red-500">{errors.name}</p>}
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Email address
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => { setEmail(e.target.value); setErrors((p) => ({ ...p, email: undefined })); }}
-                  className={`pl-10 h-11 ${errors.email ? "border-red-400 focus-visible:ring-red-400/30" : ""}`}
-                  autoComplete="email"
-                />
-              </div>
-              {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  placeholder={mode === "register" ? "Min. 8 characters" : "Enter your password"}
-                  value={password}
-                  onChange={(e) => { setPassword(e.target.value); setErrors((p) => ({ ...p, password: undefined })); }}
-                  className={`pl-10 pr-10 h-11 ${errors.password ? "border-red-400 focus-visible:ring-red-400/30" : ""}`}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
-            </div>
-
-            <Button
-              type="submit"
-              className="w-full h-11 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md hover:shadow-lg transition-all font-semibold mt-2"
-              disabled={isPending}
-            >
-              {isPending ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                  {mode === "login" ? "Signing in..." : "Creating account..."}
-                </span>
-              ) : (
-                mode === "login" ? "Sign In" : "Create Account"
               )}
-            </Button>
-          </form>
+
+              {(mode === "login" || mode === "register" || mode === "forgot") && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Email address</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Input type="email" placeholder="you@company.com" value={email} onChange={(e) => { setEmail(e.target.value); setErrors((p) => ({ ...p, email: undefined })); }} className={`pl-10 h-11 ${errors.email ? "border-red-400" : ""}`} autoComplete="email" />
+                  </div>
+                  {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
+                </div>
+              )}
+
+              {(mode === "login" || mode === "register" || mode === "reset") && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Password</label>
+                    {mode === "login" && (
+                      <button type="button" className="text-xs text-blue-600 hover:underline dark:text-blue-400" onClick={() => switchMode("forgot")}>Forgot password?</button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Input type={showPassword ? "text" : "password"} placeholder={mode === "reset" ? "New password (min. 8 chars)" : mode === "register" ? "Min. 8 characters" : "Enter your password"} value={password} onChange={(e) => { setPassword(e.target.value); setErrors((p) => ({ ...p, password: undefined })); }} className={`pl-10 pr-10 h-11 ${errors.password ? "border-red-400" : ""}`} autoComplete={mode === "login" ? "current-password" : "new-password"} />
+                    <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" tabIndex={-1}>
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full h-11 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 font-semibold mt-2" disabled={isPending}>
+                {isPending ? (
+                  <span className="flex items-center gap-2"><span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />Loading...</span>
+                ) : mode === "login" ? "Sign In" : mode === "register" ? "Create Account" : mode === "forgot" ? "Send Reset Link" : "Set New Password"}
+              </Button>
+            </form>
+          )}
 
           <div className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-            {mode === "login" ? (
-              <>
-                Don&apos;t have an account?{" "}
-                <button type="button" className="font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline" onClick={() => switchMode("register")}>
-                  Sign up free
-                </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{" "}
-                <button type="button" className="font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline" onClick={() => switchMode("login")}>
-                  Sign in
-                </button>
-              </>
-            )}
+            {mode === "login" && (<>Don&apos;t have an account?{" "}<button type="button" className="font-semibold text-blue-600 hover:underline" onClick={() => switchMode("register")}>Sign up free</button></>)}
+            {mode === "register" && (<>Already have an account?{" "}<button type="button" className="font-semibold text-blue-600 hover:underline" onClick={() => switchMode("login")}>Sign in</button></>)}
+            {(mode === "forgot" || mode === "reset") && (<button type="button" className="font-semibold text-blue-600 hover:underline" onClick={() => switchMode("login")}>Back to sign in</button>)}
           </div>
         </div>
       </DialogContent>
@@ -278,7 +265,14 @@ export function Header({ onMenuClick, showMenu }: { onMenuClick: () => void; sho
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [resetToken, setResetToken] = useState<string | undefined>();
   const [orgSetupOpen, setOrgSetupOpen] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("reset");
+    if (token) { setResetToken(token); setAuthMode("reset"); setAuthOpen(true); }
+  }, []);
 
   useEffect(() => {
     const handler = () => { setAuthMode("register"); setAuthOpen(true); };
@@ -396,7 +390,7 @@ export function Header({ onMenuClick, showMenu }: { onMenuClick: () => void; sho
         <NotificationDrawer open={notificationOpen} onClose={() => setNotificationOpen(false)} />
       )}
 
-      <AuthModal open={authOpen} onOpenChange={setAuthOpen} initialMode={authMode} />
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} initialMode={authMode} resetToken={resetToken} />
       <OrgSetupModal open={orgSetupOpen} onOpenChange={setOrgSetupOpen} />
     </>
   );

@@ -122,6 +122,17 @@ export const activities = pgTable("activities", {
 // ==========================================
 // IDEMPOTENCY TABLE (For Stripe later)
 // ==========================================
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("password_reset_token_idx").on(table.token),
+]);
+
 export const stripeEvents = pgTable("stripe_events", {
   id: uuid("id").defaultRandom().primaryKey(),
   eventId: varchar("event_id", { length: 100 }).notNull().unique(),

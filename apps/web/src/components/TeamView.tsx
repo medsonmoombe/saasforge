@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Users, UserPlus, Crown, Shield, User, Copy, Check, Loader2, Mail, Link2 } from "lucide-react";
+import { Users, UserPlus, Crown, Shield, User, Copy, Check, Loader2, Mail, Link2, Trash2 } from "lucide-react";
 import { trpc } from "@/trpc/client";
+import { useAuthContext } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +33,13 @@ export function TeamView() {
   const [inviteResult, setInviteResult] = useState<{ type: "added" | "invited"; inviteUrl: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const { userId } = useAuthContext();
+  const { data: me } = trpc.auth.me.useQuery(undefined, { enabled: !!userId });
   const { data: members, isLoading: membersLoading, refetch } = trpc.auth.getMembers.useQuery();
+
+  const { orgId } = useAuthContext();
+  const currentMember = members?.find(m => m.id === userId);
+  const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
 
   const invite = trpc.auth.inviteUser.useMutation({
     onSuccess: (data) => {
@@ -44,6 +51,16 @@ export function TeamView() {
       else toast.success("Invite email sent!");
     },
     onError: (err) => setError(err.message),
+  });
+
+  const updateRole = trpc.auth.updateMemberRole.useMutation({
+    onSuccess: () => { refetch(); toast.success("Role updated"); },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const removeMember = trpc.auth.removeMember.useMutation({
+    onSuccess: () => { refetch(); toast.success("Member removed"); },
+    onError: (err) => toast.error(err.message),
   });
 
   const handleInvite = (e: React.FormEvent) => {
@@ -77,7 +94,8 @@ export function TeamView() {
           </div>
         </div>
 
-        {/* Invite card */}
+        {/* Invite card — admin/owner only */}
+        {canManage && (
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 mb-6">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">Invite a member</h2>
           <p className="text-xs text-slate-400 dark:text-slate-500 mb-4">
@@ -181,6 +199,7 @@ export function TeamView() {
             </div>
           )}
         </div>
+        )}
 
         {/* Members list */}
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -207,23 +226,49 @@ export function TeamView() {
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {members.map((m) => {
                 const Icon = roleIcon[m.role];
+                const isMe = m.id === userId;
+                const isOwner = m.role === "owner";
                 return (
                   <div key={m.id} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white text-sm font-bold shrink-0">
                       {m.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{m.name}</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{m.name}{isMe && <span className="ml-1.5 text-xs text-slate-400">(you)</span>}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{m.email}</p>
                     </div>
-                    <span className={cn(
-                      "flex items-center gap-1.5 text-xs font-medium capitalize px-2.5 py-1 rounded-full",
-                      roleColor[m.role],
-                      roleBg[m.role]
-                    )}>
-                      <Icon className="h-3 w-3" />
-                      {m.role}
-                    </span>
+                    {canManage && !isMe && !isOwner ? (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <select
+                          value={m.role}
+                          onChange={(e) => updateRole.mutate({ memberId: m.id, role: e.target.value as "admin" | "member" })}
+                          disabled={updateRole.isPending}
+                          className="h-8 px-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-300 disabled:opacity-50"
+                        >
+                          <option value="member">Member</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                          onClick={() => removeMember.mutate({ memberId: m.id })}
+                          disabled={removeMember.isPending}
+                          title="Remove member"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className={cn(
+                        "flex items-center gap-1.5 text-xs font-medium capitalize px-2.5 py-1 rounded-full shrink-0",
+                        roleColor[m.role],
+                        roleBg[m.role]
+                      )}>
+                        <Icon className="h-3 w-3" />
+                        {m.role}
+                      </span>
+                    )}
                   </div>
                 );
               })}
