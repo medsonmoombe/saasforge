@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { CreateFastifyContextOptions } from "@trpc/server/adapters/fastify";
 
+// this context is used in the trpc router and is available in all resolvers
 export const createContext = async ({ req, res }: CreateFastifyContextOptions) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
